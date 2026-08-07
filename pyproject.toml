@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stocks"
+version = "0.1.0"
+description = "Facetwork domain: stock-group paper-trading tracker (factor + analyst + LLM selection, daily P/L snapshots vs a benchmark)"
+requires-python = ">=3.11"
+authors = [{name = "Ralph Lemke"}]
+dependencies = ["requests"]
+
+[project.optional-dependencies]
+yfinance = ["yfinance>=0.2.40"]
+
+[project.entry-points."facetwork.domains"]
+stocks = "stocks:domain"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+stocks = ["ffl/*.ffl"]

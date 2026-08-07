@@ -1,0 +1,183 @@
+/** Stock-group paper-trading tracker.
+  *
+  * Three workflows cover the whole lifecycle:
+  *
+  *   OpenStockGroup      - screen a universe, rank it, buy notionally, snapshot zero
+  *   SnapshotStockGroups - mark every open group to market (run daily by cron)
+  *   CloseStockGroup     - final mark, realised P/L per position, close the group
+  *
+  * This records notional positions only. It places no orders and is not
+  * investment advice; prices come from a delayed feed.
+  */
+
+namespace stocks.data {
+
+    /** Resolve a named universe (sp500 / nasdaq100 / dow30 / manual) to a
+      * ticker list and CACHE it. Returns a count only. */
+    event facet ResolveUniverse(
+        universe: String = "sp500"
+    ) => (
+        ticker_count: Long
+    ) with Effect(kind = "external") with Cost(tier = "cheap") with Timeout(minutes = 5)
+
+    /** Download ~400 days of daily bars for the universe plus the benchmark and
+      * CACHE them. The payload goes to the shared cache, not into the step
+      * result, which is why downstream steps must order themselves with `after`.
+      *
+      * One batched provider call, deliberately NOT a per-ticker fan-out: the
+      * provider downloads multiple symbols in a single request, so a 500-way
+      * foreach would add scheduling risk and buy nothing. */
+    event facet FetchDailyBars(
+        universe: String = "sp500",
+        pinned: String = "",
+        benchmark: String = "SPY",
+        lookback_days: Int = 400,
+        force_refresh: Boolean = false
+    ) => (
+        symbol_count: Long
+    ) with Effect(kind = "external") with Cost(tier = "expensive") with Timeout(minutes = 30)
+}
+
+namespace stocks.groups {
+
+    /** Screen + rank the cached universe, price the picks, and persist the group
+      * as open together with its full ranked candidate list. */
+    event facet OpenGroup(
+        name: String,
+        universe: String = "sp500",
+        size: Int = 10,
+        capital: Double = 100000.0,
+        horizon_days: Int = 7,
+        benchmark: String = "SPY",
+        pinned: String = "",
+        use_llm: Boolean = false,
+        factor_weights: String = "",
+        stage_weights: String = "",
+        lookback_days: Int = 400,
+        force_refresh: Boolean = false
+    ) => (
+        group_id: String,
+        ticker_count: Long,
+        initial_value: Double,
+        tickers: String
+    ) with Effect(kind = "io") with Cost(tier = "moderate") with Timeout(minutes = 20)
+
+    /** Mark one group, or every open group when group_id is blank, to market.
+      * Idempotent per US/Eastern trading date. */
+    event facet SnapshotGroups(
+        group_id: String = ""
+    ) => (
+        groups_snapshotted: Long,
+        failed_count: Long
+    ) with Effect(kind = "io") with Cost(tier = "cheap") with Timeout(minutes = 15)
+
+    /** Final mark, realised per-position P/L, group totals, status closed. */
+    event facet CloseGroup(
+        group_id: String
+    ) => (
+        group_id: String,
+        pl_abs: Double,
+        pl_pct: Double,
+        benchmark_pl_pct: Double,
+        winners: Long
+    ) with Effect(kind = "io") with Cost(tier = "cheap") with Timeout(minutes = 15)
+}
+
+namespace stocks.workflows {
+    use stocks.data
+    use stocks.groups
+
+    /** Start a new stock group: resolve the universe, cache its price history,
+      * then screen, rank, price and record the picks. */
+    workflow OpenStockGroup(
+        name: String = "Untitled group",
+        universe: String = "sp500",
+        size: Int = 10,
+        capital: Double = 100000.0,
+        horizon_days: Int = 7,
+        benchmark: String = "SPY",
+        pinned: String = "",
+        use_llm: Boolean = false,
+        factor_weights: String = "",
+        stage_weights: String = "",
+        lookback_days: Int = 400,
+        force_refresh: Boolean = false
+    ) => (
+        group_id: String,
+        ticker_count: Long,
+        initial_value: Double,
+        tickers: String
+    ) andThen {
+
+        universe_step = ResolveUniverse(universe = $.universe)
+
+        // Ordered behind the universe by the reference on ticker_count.
+        bars = FetchDailyBars(
+            universe = $.universe,
+            pinned = $.pinned,
+            benchmark = $.benchmark,
+            lookback_days = $.lookback_days,
+            force_refresh = $.force_refresh
+        ) after universe_step
+
+        // INVISIBLE dependency: the bars live in the shared cache and no value
+        // flows from the fetch into the open, so the ordering must be explicit.
+        opened = OpenGroup(
+            name = $.name,
+            universe = $.universe,
+            size = $.size,
+            capital = $.capital,
+            horizon_days = $.horizon_days,
+            benchmark = $.benchmark,
+            pinned = $.pinned,
+            use_llm = $.use_llm,
+            factor_weights = $.factor_weights,
+            stage_weights = $.stage_weights,
+            lookback_days = $.lookback_days,
+            force_refresh = $.force_refresh
+        ) after bars
+
+        yield OpenStockGroup(
+            group_id = opened.group_id,
+            ticker_count = opened.ticker_count,
+            initial_value = opened.initial_value,
+            tickers = opened.tickers
+        )
+    }
+
+    /** Mark open groups to market. Blank group_id means every open group -
+      * this is the form the daily cron entry runs. */
+    workflow SnapshotStockGroups(
+        group_id: String = ""
+    ) => (
+        groups_snapshotted: Long,
+        failed_count: Long
+    ) andThen {
+        snap = SnapshotGroups(group_id = $.group_id)
+        yield SnapshotStockGroups(
+            groups_snapshotted = snap.groups_snapshotted,
+            failed_count = snap.failed_count
+        )
+    }
+
+    /** End a group and record the result. CloseGroup takes its own final mark,
+      * so no separate snapshot step is needed here. */
+    workflow CloseStockGroup(
+        group_id: String
+    ) => (
+        group_id: String,
+        pl_abs: Double,
+        pl_pct: Double,
+        benchmark_pl_pct: Double,
+        winners: Long
+    ) andThen {
+        closed = CloseGroup(group_id = $.group_id)
+        yield CloseStockGroup(
+            group_id = closed.group_id,
+            pl_abs = closed.pl_abs,
+            pl_pct = closed.pl_pct,
+            benchmark_pl_pct = closed.benchmark_pl_pct,
+            winners = closed.winners
+        )
+    }
+}
