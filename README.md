@@ -5,11 +5,29 @@ reproducible ranking strategy, records the entry prices, marks the group to
 market daily, and on close writes per-position and overall profit/loss to
 MongoDB alongside a benchmark comparison.
 
-> **Paper trading only.** This records notional positions to *measure* a
-> selection strategy. It places no orders and is not investment advice. Prices
-> come from a delayed feed. No selection rule predicts returns — the benchmark
-> comparison exists so you can see whether the strategy actually beat simply
-> holding the index.
+> ## ⚠️ Paper trading only — not investment advice
+>
+> This tool records **notional (simulated) positions**. It places no orders,
+> holds no assets, connects to no broker, and moves no money.
+>
+> **Nothing produced by this software is a recommendation to buy or sell any
+> security, and none of it is financial, investment, tax or legal advice.** Do
+> not make investment decisions on the basis of its output. Consult a licensed
+> financial advisor.
+>
+> **Past performance does not predict future results, and no selection rule
+> predicts returns.** The scores are a transparent ranking over documented
+> historical factors — they are not a forecast. The benchmark comparison exists
+> so you can check whether the strategy actually beat simply holding the index,
+> which is the only honest test of it.
+>
+> Prices come from a **delayed, unofficial feed** that can be wrong, stale or
+> unavailable. Reported returns **exclude commissions, spreads, slippage,
+> borrowing costs, taxes and dividends**, so real-world results would differ,
+> generally for the worse.
+>
+> Provided as-is, without warranty of any kind. You are solely responsible for
+> any use you make of it.
 
 Web UI: **`/stocks`** in the Facetwork dashboard (Apps → Stock Groups).
 
