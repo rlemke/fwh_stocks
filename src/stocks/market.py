@@ -21,9 +21,11 @@ logger = logging.getLogger("stocks.market")
 BARS_CACHE_TYPE = "bars"
 UNIVERSE_CACHE_TYPE = "universe"
 ANALYST_CACHE_TYPE = "analyst"
+SECTOR_CACHE_TYPE = "sectors"
 
-BARS_MAX_AGE_S = 12 * 3600      # refetch daily; a session's bars settle after the close
+BARS_MAX_AGE_S = 12 * 3600  # refetch daily; a session's bars settle after the close
 UNIVERSE_MAX_AGE_S = 7 * 86400  # constituents change a few times a year
+SECTOR_MAX_AGE_S = 7 * 86400  # a company changes GICS sector very rarely
 ANALYST_MAX_AGE_S = 24 * 3600
 
 BENCHMARK_DEFAULT = "SPY"
@@ -61,10 +63,36 @@ def resolve_universe(name: str, provider: PriceProvider | None = None) -> list[s
         return list(cached)
     tickers = provider.universe(name)
     storage.write_json_cached(
-        UNIVERSE_CACHE_TYPE, f"{provider.name}/{name}.json", tickers,
+        UNIVERSE_CACHE_TYPE,
+        f"{provider.name}/{name}.json",
+        tickers,
         extra={"universe": name, "count": len(tickers)},
     )
     return tickers
+
+
+def resolve_sector_map(provider: PriceProvider | None = None) -> dict[str, str]:
+    """``{ticker: GICS sector}``, cached for a week.
+
+    Returns ``{}`` when the provider cannot classify anything, which callers
+    must treat as "no sector information" — never as "no ticker has a sector",
+    since silently filtering everything out would look like an empty universe.
+    """
+    provider = provider or get_provider()
+    key = f"{provider.name}.json"
+    cached = storage.read_json_cached(SECTOR_CACHE_TYPE, key, max_age_s=SECTOR_MAX_AGE_S)
+    if cached:
+        return dict(cached)
+    try:
+        mapping = provider.sector_map()
+    except Exception as exc:  # noqa: BLE001 - sector data is optional context
+        logger.warning("could not load the sector map from %s: %s", provider.name, exc)
+        return {}
+    if mapping:
+        storage.write_json_cached(
+            SECTOR_CACHE_TYPE, key, mapping, extra={"ticker_count": len(mapping)}
+        )
+    return mapping
 
 
 def fetch_daily_bars(
@@ -91,8 +119,10 @@ def fetch_daily_bars(
 
     for ticker in wanted:
         key = _bars_key(provider.name, ticker, start, end)
-        cached = None if force else storage.read_json_cached(
-            BARS_CACHE_TYPE, key, max_age_s=BARS_MAX_AGE_S
+        cached = (
+            None
+            if force
+            else storage.read_json_cached(BARS_CACHE_TYPE, key, max_age_s=BARS_MAX_AGE_S)
         )
         if cached:
             out[ticker] = _to_bars(cached)
@@ -108,7 +138,11 @@ def fetch_daily_bars(
                 BARS_CACHE_TYPE,
                 _bars_key(provider.name, ticker, start, end),
                 _from_bars(bars),
-                source={"provider": provider.name, "start": start.isoformat(), "end": end.isoformat()},
+                source={
+                    "provider": provider.name,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                },
                 extra={"ticker": ticker, "bar_count": len(bars)},
             )
 
@@ -131,8 +165,10 @@ def fetch_analyst(
 
     for ticker in tickers:
         key = f"{provider.name}/{today}/{ticker}.json"
-        cached = None if force else storage.read_json_cached(
-            ANALYST_CACHE_TYPE, key, max_age_s=ANALYST_MAX_AGE_S
+        cached = (
+            None
+            if force
+            else storage.read_json_cached(ANALYST_CACHE_TYPE, key, max_age_s=ANALYST_MAX_AGE_S)
         )
         if cached:
             out[ticker] = AnalystView(**cached)

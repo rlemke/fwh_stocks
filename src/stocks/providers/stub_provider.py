@@ -21,22 +21,80 @@ from . import AnalystView, Bar, ProviderError, Quote
 # prices so nothing here should ever be mistaken for market data.
 _UNIVERSES: dict[str, list[str]] = {
     "sp500": [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B",
-        "JPM", "V", "UNH", "XOM", "JNJ", "WMT", "MA", "PG", "AVGO", "HD",
-        "CVX", "MRK", "ABBV", "COST", "PEP", "KO", "ADBE", "CSCO", "CRM",
-        "MCD", "TMO", "ACN",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "TSLA",
+        "BRK-B",
+        "JPM",
+        "V",
+        "UNH",
+        "XOM",
+        "JNJ",
+        "WMT",
+        "MA",
+        "PG",
+        "AVGO",
+        "HD",
+        "CVX",
+        "MRK",
+        "ABBV",
+        "COST",
+        "PEP",
+        "KO",
+        "ADBE",
+        "CSCO",
+        "CRM",
+        "MCD",
+        "TMO",
+        "ACN",
     ],
     "nasdaq100": [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO",
-        "COST", "ADBE", "CSCO", "PEP", "AMD", "INTC", "QCOM", "TXN",
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMZN",
+        "GOOGL",
+        "META",
+        "TSLA",
+        "AVGO",
+        "COST",
+        "ADBE",
+        "CSCO",
+        "PEP",
+        "AMD",
+        "INTC",
+        "QCOM",
+        "TXN",
     ],
     "dow30": [
-        "AAPL", "MSFT", "JPM", "V", "UNH", "JNJ", "WMT", "PG", "HD", "CVX",
-        "MRK", "KO", "MCD", "CSCO", "IBM", "GS",
+        "AAPL",
+        "MSFT",
+        "JPM",
+        "V",
+        "UNH",
+        "JNJ",
+        "WMT",
+        "PG",
+        "HD",
+        "CVX",
+        "MRK",
+        "KO",
+        "MCD",
+        "CSCO",
+        "IBM",
+        "GS",
     ],
 }
 
 BENCHMARK = "SPY"
+
+#: Left out of the synthetic sector map on purpose, so the unclassified-ticker
+#: path is exercised by the offline suite rather than only in production.
+_UNCLASSIFIED = "ACN"
 
 
 def _seed(ticker: str) -> int:
@@ -58,6 +116,24 @@ class StubProvider:
                 f"Unknown universe {name!r}. Available: {', '.join(sorted(_UNIVERSES))}"
             )
         return list(tickers)
+
+    def sector_map(self) -> dict[str, str]:
+        """Deterministic synthetic sectors, spread across all eleven.
+
+        Assigned by hash so the mapping is stable across hosts and runs, which
+        is what lets sector-filter tests assert on exact membership. One ticker
+        is deliberately left unclassified so the "unknown sector" path stays
+        covered.
+        """
+        from ..sectors import SECTORS
+
+        out: dict[str, str] = {}
+        for tickers in _UNIVERSES.values():
+            for ticker in tickers:
+                if ticker == _UNCLASSIFIED:
+                    continue
+                out[ticker] = SECTORS[_seed(ticker) % len(SECTORS)]
+        return out
 
     # -- prices ------------------------------------------------------------
 
@@ -106,7 +182,9 @@ class StubProvider:
         out: dict[str, list[Bar]] = {}
         for ticker in tickers:
             bars = self._series(ticker, days)
-            out[ticker] = [b for b in bars if start.isoformat() <= b.date <= end.isoformat()] or bars
+            out[ticker] = [
+                b for b in bars if start.isoformat() <= b.date <= end.isoformat()
+            ] or bars
         return out
 
     def quotes(self, tickers: list[str]) -> dict[str, Quote]:

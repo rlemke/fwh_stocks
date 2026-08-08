@@ -97,6 +97,15 @@ class PriceProvider(Protocol):
         """Ticker list for a named universe (``sp500``, ``nasdaq100``, ``dow30``)."""
         ...
 
+    def sector_map(self) -> dict[str, str]:
+        """``{ticker: GICS sector}`` for everything the provider can classify.
+
+        Whole-universe rather than per-ticker on purpose: sector filtering has
+        to run before the expensive stages, so it must not cost one request per
+        symbol. Tickers absent from the result are simply unclassified.
+        """
+        ...
+
     def daily_bars(self, tickers: list[str], start: date, end: date) -> dict[str, list[Bar]]:
         """Daily bars per ticker. Tickers with no data are omitted, not empty-listed."""
         ...

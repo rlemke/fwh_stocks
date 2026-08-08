@@ -81,7 +81,11 @@ def handle_fetch_daily_bars(params: dict[str, Any]) -> dict[str, Any]:
     step_log = _log_wrapper(params)
     universe = params.get("universe") or "sp500"
     benchmark = params.get("benchmark") or "SPY"
-    pinned = [t.strip().upper() for t in str(params.get("pinned") or "").replace(";", ",").split(",") if t.strip()]
+    pinned = [
+        t.strip().upper()
+        for t in str(params.get("pinned") or "").replace(";", ",").split(",")
+        if t.strip()
+    ]
     try:
         tickers = pinned if universe == "manual" else market.resolve_universe(universe)
         tickers = list(dict.fromkeys([*tickers, *pinned]))
@@ -118,6 +122,8 @@ def handle_open_group(params: dict[str, Any]) -> dict[str, Any]:
             benchmark=params.get("benchmark") or "SPY",
             pinned=params.get("pinned") or "",
             use_llm=bool(params.get("use_llm")),
+            sectors=params.get("sectors") or "",
+            max_per_sector=int(params.get("max_per_sector") or 0),
             factor_weights=_json_param(params.get("factor_weights")) or None,
             stage_weights=_json_param(params.get("stage_weights")) or None,
             lookback_days=int(params.get("lookback_days") or 400),

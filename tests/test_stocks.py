@@ -11,7 +11,9 @@ import math
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+
 from stocks import portfolio, screener, selection
+from stocks import sectors as sectors_mod
 from stocks.providers import AnalystView, Bar, ProviderError, Quote, get_provider
 from stocks.providers.stub_provider import StubProvider
 
@@ -261,10 +263,12 @@ def test_analyst_target_upside_none_when_incomputable():
 
 def test_analyst_thin_coverage_is_excluded_not_zeroed():
     views = {
-        "COVERED": AnalystView("COVERED", recommendation_mean=1.5, target_mean=120,
-                               current_price=100, analyst_count=20),
-        "THIN": AnalystView("THIN", recommendation_mean=1.0, target_mean=200,
-                            current_price=100, analyst_count=1),
+        "COVERED": AnalystView(
+            "COVERED", recommendation_mean=1.5, target_mean=120, current_price=100, analyst_count=20
+        ),
+        "THIN": AnalystView(
+            "THIN", recommendation_mean=1.0, target_mean=200, current_price=100, analyst_count=1
+        ),
     }
     scores = selection.score_analysts(views)
     assert "THIN" not in scores
@@ -273,10 +277,12 @@ def test_analyst_thin_coverage_is_excluded_not_zeroed():
 
 def test_analyst_lower_recommendation_mean_scores_higher():
     views = {
-        "BUY": AnalystView("BUY", recommendation_mean=1.2, target_mean=110,
-                           current_price=100, analyst_count=10),
-        "HOLD": AnalystView("HOLD", recommendation_mean=3.5, target_mean=110,
-                            current_price=100, analyst_count=10),
+        "BUY": AnalystView(
+            "BUY", recommendation_mean=1.2, target_mean=110, current_price=100, analyst_count=10
+        ),
+        "HOLD": AnalystView(
+            "HOLD", recommendation_mean=3.5, target_mean=110, current_price=100, analyst_count=10
+        ),
     }
     scores = selection.score_analysts(views)
     assert scores["BUY"] > scores["HOLD"]
@@ -293,8 +299,9 @@ def test_analyst_no_usable_coverage_returns_empty():
 
 def _cands(**scores) -> list[screener.Candidate]:
     return [
-        screener.Candidate(ticker=t, last_price=100.0, avg_dollar_volume=1e8,
-                           bar_count=300, screen_score=s)
+        screener.Candidate(
+            ticker=t, last_price=100.0, avg_dollar_volume=1e8, bar_count=300, screen_score=s
+        )
         for t, s in scores.items()
     ]
 
@@ -327,7 +334,9 @@ def test_rank_llm_adjustment_can_reorder():
     cands = _cands(A=1.0, B=0.9)
     weights = {"screen": 0.5, "analyst": 0.0, "llm": 5.0}
     scored = selection.rank_candidates(
-        cands, size=1, stage_weights=weights,
+        cands,
+        size=1,
+        stage_weights=weights,
         llm_adjustments={"B": (1.0, "strong pipeline"), "A": (-1.0, "one-off gain")},
     )
     assert [c.ticker for c in scored if c.selected] == ["B"]
@@ -337,10 +346,14 @@ def test_rank_llm_adjustment_can_reorder():
 def test_rank_persists_every_component_for_audit():
     scored = selection.rank_candidates(
         _cands(A=2.0, B=1.0),
-        analyst_views={"A": AnalystView("A", recommendation_mean=1.1, target_mean=130,
-                                        current_price=100, analyst_count=15),
-                       "B": AnalystView("B", recommendation_mean=3.0, target_mean=105,
-                                        current_price=100, analyst_count=15)},
+        analyst_views={
+            "A": AnalystView(
+                "A", recommendation_mean=1.1, target_mean=130, current_price=100, analyst_count=15
+            ),
+            "B": AnalystView(
+                "B", recommendation_mean=3.0, target_mean=105, current_price=100, analyst_count=15
+            ),
+        },
         size=1,
     )
     top = scored[0].to_dict()
@@ -395,12 +408,16 @@ def test_trading_date_accepts_naive_datetime_as_utc():
 
 
 def _quotes(prices: dict[str, float]) -> dict[str, Quote]:
-    return {t: Quote(ticker=t, price=p, as_of="2024-07-01T20:30:00+00:00") for t, p in prices.items()}
+    return {
+        t: Quote(ticker=t, price=p, as_of="2024-07-01T20:30:00+00:00") for t, p in prices.items()
+    }
 
 
 def test_size_positions_equal_weights_and_full_investment():
     picks = [{"ticker": t} for t in ("A", "B", "C", "D")]
-    positions, skipped = portfolio.size_positions(picks, 100_000.0, _quotes({"A": 10, "B": 20, "C": 50, "D": 200}))
+    positions, skipped = portfolio.size_positions(
+        picks, 100_000.0, _quotes({"A": 10, "B": 20, "C": 50, "D": 200})
+    )
     assert skipped == []
     assert len(positions) == 4
     assert all(p["weight"] == pytest.approx(0.25) for p in positions)
@@ -424,9 +441,7 @@ def test_size_positions_with_no_prices_returns_nothing():
 
 
 def test_size_positions_ignores_a_zero_price():
-    positions, skipped = portfolio.size_positions(
-        [{"ticker": "A"}], 1000.0, _quotes({"A": 0.0})
-    )
+    positions, skipped = portfolio.size_positions([{"ticker": "A"}], 1000.0, _quotes({"A": 0.0}))
     assert positions == [] and skipped == ["A"]
 
 
@@ -501,6 +516,7 @@ def test_snapshot_of_an_empty_group_does_not_divide_by_zero():
 def test_snapshot_serialises_to_json_safe_types():
     snap = portfolio.build_snapshot(_positions({"A": (10.0, 100.0)}), _quotes({"A": 11.0}))
     import json
+
     assert json.loads(json.dumps(snap.to_dict()))["total_value"] == 1100.0
 
 
@@ -540,13 +556,165 @@ def test_full_offline_round_trip_open_snapshot_close():
     assert sum(p["cost"] for p in positions) == pytest.approx(100_000.0, abs=0.1)
 
     snap = portfolio.build_snapshot(
-        positions, quotes,
+        positions,
+        quotes,
         benchmark_entry=quotes["SPY"].price,
         benchmark_quote=quotes["SPY"],
     )
-    assert snap.pl_abs == pytest.approx(0.0, abs=0.01)      # same prices => flat
+    assert snap.pl_abs == pytest.approx(0.0, abs=0.01)  # same prices => flat
     assert snap.benchmark_pl_pct == pytest.approx(0.0)
 
     closed = portfolio.close_positions(positions, snap)
     assert len(closed) == len(positions)
     assert all("exit_price" in p for p in closed)
+
+
+# --------------------------------------------------------------------------
+# sectors
+# --------------------------------------------------------------------------
+
+
+def test_sector_canonical_names_resolve_to_themselves():
+    for name in sectors_mod.SECTORS:
+        assert sectors_mod.resolve_sector(name) == name
+
+
+def test_sector_everyday_aliases():
+    assert sectors_mod.resolve_sector("tech") == "Information Technology"
+    assert sectors_mod.resolve_sector("Medical") == "Health Care"
+    assert sectors_mod.resolve_sector("biotech") == "Health Care"
+    assert sectors_mod.resolve_sector("banks") == "Financials"
+    assert sectors_mod.resolve_sector("oil") == "Energy"
+    assert sectors_mod.resolve_sector("REITs") == "Real Estate"
+
+
+def test_sector_resolution_ignores_case_and_punctuation():
+    assert sectors_mod.resolve_sector("  health-care ") == "Health Care"
+    assert sectors_mod.resolve_sector("INFORMATION TECHNOLOGY") == "Information Technology"
+
+
+def test_ambiguous_sector_raises_and_names_the_candidates():
+    """'services' could be two sectors; guessing would build the wrong group."""
+    with pytest.raises(sectors_mod.SectorError) as exc:
+        sectors_mod.resolve_sector("services")
+    assert "Communication Services" in str(exc.value)
+    assert "Consumer Discretionary" in str(exc.value)
+
+
+def test_unknown_sector_raises_and_lists_valid_ones():
+    with pytest.raises(sectors_mod.SectorError) as exc:
+        sectors_mod.resolve_sector("crypto")
+    assert "Information Technology" in str(exc.value)
+
+
+def test_normalize_sector_never_raises():
+    assert sectors_mod.normalize_sector("crypto") is None
+    assert sectors_mod.normalize_sector("services") is None
+    assert sectors_mod.normalize_sector("") is None
+    assert sectors_mod.normalize_sector("tech") == "Information Technology"
+
+
+def test_resolve_sectors_list_form():
+    assert sectors_mod.resolve_sectors("tech, medical") == [
+        "Health Care",
+        "Information Technology",
+    ]
+    assert sectors_mod.resolve_sectors(["Energy", "energy"]) == ["Energy"]
+
+
+def test_resolve_sectors_empty_means_all():
+    assert sectors_mod.resolve_sectors("") == []
+    assert sectors_mod.resolve_sectors(None) == []
+
+
+def test_resolve_sectors_order_is_stable_regardless_of_input_order():
+    a = sectors_mod.resolve_sectors("medical, tech")
+    b = sectors_mod.resolve_sectors("tech, medical")
+    assert a == b
+
+
+def test_stub_sector_map_covers_the_universe_and_uses_real_sectors():
+    mapping = StubProvider().sector_map()
+    assert len(mapping) > 20
+    assert set(mapping.values()) <= set(sectors_mod.SECTORS)
+
+
+def test_stub_sector_map_leaves_one_ticker_unclassified():
+    """The unclassified path must stay exercised offline."""
+    mapping = StubProvider().sector_map()
+    assert "ACN" not in mapping
+    assert "AAPL" in mapping
+
+
+def test_stub_sector_map_is_deterministic():
+    assert StubProvider().sector_map() == StubProvider().sector_map()
+
+
+# --------------------------------------------------------------------------
+# per-sector cap
+# --------------------------------------------------------------------------
+
+
+def test_sector_cap_limits_picks_per_sector():
+    cands = _cands(A=5.0, B=4.0, C=3.0, D=2.0)
+    sector_of = {
+        "A": "Information Technology",
+        "B": "Information Technology",
+        "C": "Health Care",
+        "D": "Energy",
+    }
+    scored = selection.rank_candidates(cands, size=3, sector_of=sector_of, max_per_sector=1)
+    picked = [c.ticker for c in scored if c.selected]
+    assert picked == ["A", "C", "D"]  # B skipped: second Info Tech
+
+
+def test_sector_cap_of_zero_is_unlimited():
+    cands = _cands(A=5.0, B=4.0, C=3.0)
+    sector_of = dict.fromkeys("ABC", "Information Technology")
+    scored = selection.rank_candidates(cands, size=3, sector_of=sector_of, max_per_sector=0)
+    assert len([c for c in scored if c.selected]) == 3
+
+
+def test_sector_cap_returns_a_short_group_rather_than_breaking_the_cap():
+    """A silently-broken constraint is worse than a smaller group."""
+    cands = _cands(A=5.0, B=4.0, C=3.0)
+    sector_of = dict.fromkeys("ABC", "Information Technology")
+    scored = selection.rank_candidates(cands, size=3, sector_of=sector_of, max_per_sector=1)
+    picked = [c.ticker for c in scored if c.selected]
+    assert picked == ["A"]
+
+
+def test_sector_cap_counts_pinned_picks_without_capping_them():
+    cands = _cands(A=5.0, B=4.0, C=3.0)
+    sector_of = {"A": "Information Technology", "B": "Information Technology", "C": "Health Care"}
+    scored = selection.rank_candidates(
+        cands, size=3, sector_of=sector_of, max_per_sector=1, pinned=["B"]
+    )
+    picked = {c.ticker for c in scored if c.selected}
+    assert "B" in picked  # pinned survives the cap
+    assert "A" not in picked  # its sector slot is already used by B
+    assert "C" in picked
+
+
+def test_unclassified_candidates_are_never_capped():
+    """No sector means no bucket to count against."""
+    cands = _cands(A=5.0, B=4.0, C=3.0)
+    scored = selection.rank_candidates(cands, size=3, sector_of={}, max_per_sector=1)
+    assert len([c for c in scored if c.selected]) == 3
+
+
+def test_sector_is_recorded_on_each_candidate():
+    scored = selection.rank_candidates(_cands(A=1.0), size=1, sector_of={"A": "Health Care"})
+    assert scored[0].sector == "Health Care"
+    assert scored[0].to_dict()["sector"] == "Health Care"
+
+
+def test_sector_map_beats_the_analyst_blob():
+    """GICS is complete and authoritative; the analyst field is neither."""
+    scored = selection.rank_candidates(
+        _cands(A=1.0),
+        analyst_views={"A": AnalystView("A", sector="Synthetic")},
+        sector_of={"A": "Utilities"},
+        size=1,
+    )
+    assert scored[0].sector == "Utilities"

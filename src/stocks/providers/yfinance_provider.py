@@ -39,9 +39,36 @@ _UNIVERSE_SOURCES: dict[str, str] = {
 # learn 30 symbols that change a few times a decade is not worth the failure mode.
 _UNIVERSE_STATIC: dict[str, list[str]] = {
     "dow30": [
-        "AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW",
-        "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM", "MRK",
-        "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "VZ", "WMT",
+        "AAPL",
+        "AMGN",
+        "AXP",
+        "BA",
+        "CAT",
+        "CRM",
+        "CSCO",
+        "CVX",
+        "DIS",
+        "DOW",
+        "GS",
+        "HD",
+        "HON",
+        "IBM",
+        "JNJ",
+        "JPM",
+        "KO",
+        "MCD",
+        "MMM",
+        "MRK",
+        "MSFT",
+        "NKE",
+        "NVDA",
+        "PG",
+        "SHW",
+        "TRV",
+        "UNH",
+        "V",
+        "VZ",
+        "WMT",
     ],
 }
 
@@ -75,16 +102,39 @@ class YFinanceProvider:
             known = sorted({*_UNIVERSE_SOURCES, *_UNIVERSE_STATIC})
             raise ProviderError(f"Unknown universe {name!r}. Available: {', '.join(known)}")
 
-        try:
-            body = _http_get(url).decode("utf-8", "replace")
-        except Exception as exc:  # network/HTTP — explicit, never an empty list
-            raise ProviderError(f"Could not fetch the {key} constituent list: {exc}") from exc
-
-        rows = list(csv.DictReader(io.StringIO(body)))
+        rows = self._constituent_rows(key, url)
         tickers = [_normalise(r["Symbol"]) for r in rows if r.get("Symbol")]
         if not tickers:
             raise ProviderError(f"The {key} constituent list came back empty ({url})")
         return tickers
+
+    def sector_map(self) -> dict[str, str]:
+        """Ticker -> GICS sector, from the S&P 500 constituent table.
+
+        That table carries a ``GICS Sector`` column, so classification is a
+        by-product of a list we already fetch. It covers the S&P 500 plus most
+        of the Nasdaq 100 and all of the Dow 30 (they overlap heavily), which is
+        why it backs EVERY universe rather than only sp500. Anything outside it
+        is reported unclassified rather than guessed at.
+        """
+        rows = self._constituent_rows("sp500", _UNIVERSE_SOURCES["sp500"])
+        out: dict[str, str] = {}
+        for row in rows:
+            symbol = row.get("Symbol")
+            sector = (row.get("GICS Sector") or "").strip()
+            if symbol and sector:
+                out[_normalise(symbol)] = sector
+        if not out:
+            raise ProviderError("The constituent table carried no GICS Sector column")
+        return out
+
+    @staticmethod
+    def _constituent_rows(key: str, url: str) -> list[dict]:
+        try:
+            body = _http_get(url).decode("utf-8", "replace")
+        except Exception as exc:  # network/HTTP — explicit, never an empty list
+            raise ProviderError(f"Could not fetch the {key} constituent list: {exc}") from exc
+        return list(csv.DictReader(io.StringIO(body)))
 
     # -- prices ------------------------------------------------------------
 
@@ -100,7 +150,7 @@ class YFinanceProvider:
                 start=start.isoformat(),
                 end=end.isoformat(),
                 interval="1d",
-                auto_adjust=True,   # split/dividend adjusted — the factor math needs this
+                auto_adjust=True,  # split/dividend adjusted — the factor math needs this
                 actions=False,
                 group_by="ticker",
                 threads=True,
@@ -222,9 +272,7 @@ class YFinanceProvider:
                 ticker=symbol,
                 recommendation_mean=_as_float(info.get("recommendationMean")),
                 target_mean=_as_float(info.get("targetMeanPrice")),
-                current_price=_as_float(
-                    info.get("currentPrice") or info.get("regularMarketPrice")
-                ),
+                current_price=_as_float(info.get("currentPrice") or info.get("regularMarketPrice")),
                 analyst_count=_as_int(info.get("numberOfAnalystOpinions")),
                 name=info.get("longName") or info.get("shortName"),
                 sector=info.get("sector"),

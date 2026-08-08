@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from . import db as dbmod
 from . import market, portfolio, screener, selection
+from .sectors import resolve_sectors
 
 logger = logging.getLogger("stocks.service")
 
@@ -77,6 +78,8 @@ def open_group(
     benchmark: str = DEFAULT_BENCHMARK,
     pinned: str | list[str] | None = None,
     use_llm: bool = False,
+    sectors: str | list[str] | None = None,
+    max_per_sector: int = 0,
     factor_weights: dict[str, float] | None = None,
     stage_weights: dict[str, float] | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
@@ -111,7 +114,34 @@ def open_group(
             if universe == "manual"
             else f"universe {universe!r} resolved to no tickers"
         )
-    # Pinned names must be priced even when they sit outside the universe.
+    # Sector data classifies the whole universe in one cached call, so the
+    # filter runs BEFORE the expensive bar download rather than after it: asking
+    # for Health Care fetches ~59 symbols, not 503.
+    wanted_sectors = resolve_sectors(sectors)
+    sector_of = market.resolve_sector_map(provider) if (wanted_sectors or max_per_sector) else {}
+
+    if wanted_sectors:
+        if not sector_of:
+            raise GroupError(
+                "sector filtering was requested but no sector data is available from "
+                f"provider {provider.name!r} - refusing to silently ignore the filter"
+            )
+        allowed = set(wanted_sectors)
+        kept = [t for t in universe_tickers if sector_of.get(t) in allowed]
+        unclassified = [t for t in universe_tickers if t not in sector_of]
+        if not kept:
+            raise GroupError(
+                f"no ticker in universe {universe!r} is in {', '.join(wanted_sectors)}"
+            )
+        log(
+            f"Sector filter {', '.join(wanted_sectors)}: {len(kept)} of "
+            f"{len(universe_tickers)} tickers kept"
+            + (f" ({len(unclassified)} unclassified, excluded)" if unclassified else "")
+        )
+        universe_tickers = kept
+
+    # Pinned names must be priced even when they sit outside the universe or the
+    # chosen sectors — an explicit request outranks the filter.
     universe_tickers = list(dict.fromkeys([*universe_tickers, *pinned_list]))
     log(f"Universe {universe}: {len(universe_tickers)} tickers (provider={provider.name})")
 
@@ -143,7 +173,11 @@ def open_group(
     llm_adjustments: dict[str, tuple[float, str]] = {}
     if use_llm:
         preliminary = selection.rank_candidates(
-            result.ranked, analyst_views=views, stage_weights=stage_weights, size=size
+            result.ranked,
+            analyst_views=views,
+            stage_weights=stage_weights,
+            size=size,
+            sector_of=sector_of,
         )
         llm_adjustments = selection.llm_rerank(preliminary[: selection.LLM_SHORTLIST])
         log(f"LLM re-rank returned {len(llm_adjustments)} adjustments")
@@ -155,10 +189,19 @@ def open_group(
         stage_weights=stage_weights,
         size=size,
         pinned=pinned_list,
+        sector_of=sector_of,
+        max_per_sector=max_per_sector,
     )
     picks = [c.to_dict() for c in scored if c.selected]
     if not picks:
         raise GroupError("selection produced no picks")
+    if max_per_sector and len(picks) < size:
+        # Say so rather than letting the group look like the screen ran dry.
+        log(
+            f"Sector cap of {max_per_sector} per sector filled {len(picks)} of "
+            f"{size} slots; the group is smaller by design.",
+            level="warning",
+        )
 
     quotes = market.fetch_quotes([p["ticker"] for p in picks] + [benchmark], provider=provider)
     positions, skipped = portfolio.size_positions(picks, capital, quotes)
@@ -188,6 +231,8 @@ def open_group(
             "size": int(size),
             "capital": float(capital),
             "use_llm": bool(use_llm),
+            "sectors": wanted_sectors,
+            "max_per_sector": int(max_per_sector),
             "factor_weights": result.weights,
             "stage_weights": {**selection.DEFAULT_STAGE_WEIGHTS, **(stage_weights or {})},
             "lookback_days": int(lookback_days),
@@ -289,10 +334,7 @@ def snapshot_group(db, group_id: str, *, step_log=None, kind: str = "interim") -
         },
     )
 
-    message = (
-        f"Snapshot {group_id}: ${snapshot.total_value:,.2f} "
-        f"({snapshot.pl_pct * 100:+.2f}%)"
-    )
+    message = f"Snapshot {group_id}: ${snapshot.total_value:,.2f} ({snapshot.pl_pct * 100:+.2f}%)"
     if snapshot.missing:
         message += f" — no quote for {', '.join(snapshot.missing)}"
     logger.info(message)
@@ -316,9 +358,7 @@ def snapshot_open_groups(db, group_id: str = "", *, step_log=None) -> dict:
     One group failing does not abort the rest — a delisted symbol in one group
     must not stop the others from recording their day.
     """
-    groups = (
-        [dbmod.get_group(db, group_id)] if group_id else dbmod.list_open_groups(db)
-    )
+    groups = [dbmod.get_group(db, group_id)] if group_id else dbmod.list_open_groups(db)
     groups = [g for g in groups if g]
     if group_id and not groups:
         raise GroupError(f"unknown group {group_id!r}")
@@ -366,9 +406,7 @@ def close_group(db, group_id: str, *, step_log=None) -> dict:
     benchmark_pl_pct = final.get("benchmark_pl_pct")
 
     for pos in positions:
-        holding = next(
-            (h for h in final.get("holdings", []) if h["ticker"] == pos["ticker"]), None
-        )
+        holding = next((h for h in final.get("holdings", []) if h["ticker"] == pos["ticker"]), None)
         if holding is None:
             continue
         dbmod.update_position(
@@ -404,9 +442,7 @@ def close_group(db, group_id: str, *, step_log=None) -> dict:
                 # Excess return vs the benchmark. This is the number that says
                 # whether the strategy was worth running at all.
                 "alpha": (
-                    round(pl_pct - benchmark_pl_pct, 4)
-                    if benchmark_pl_pct is not None
-                    else None
+                    round(pl_pct - benchmark_pl_pct, 4) if benchmark_pl_pct is not None else None
                 ),
                 "winners": winners,
                 "losers": losers,

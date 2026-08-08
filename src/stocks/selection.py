@@ -37,10 +37,10 @@ ANALYST_WEIGHTS: dict[str, float] = {
     "target_upside": 0.5,
 }
 
-ANALYST_SHORTLIST = 50   # how many screen survivors get a consensus lookup
-LLM_SHORTLIST = 25       # how many of those go to the model
+ANALYST_SHORTLIST = 50  # how many screen survivors get a consensus lookup
+LLM_SHORTLIST = 25  # how many of those go to the model
 LLM_MODEL = "claude-sonnet-5"
-MIN_ANALYST_COUNT = 3    # below this, coverage is too thin to be a signal
+MIN_ANALYST_COUNT = 3  # below this, coverage is too thin to be a signal
 
 
 @dataclass
@@ -102,7 +102,9 @@ def score_analysts(views: dict[str, AnalystView]) -> dict[str, float]:
     if not usable:
         return {}
 
-    rec_raw = {t: v.recommendation_mean for t, v in usable.items() if v.recommendation_mean is not None}
+    rec_raw = {
+        t: v.recommendation_mean for t, v in usable.items() if v.recommendation_mean is not None
+    }
     up_raw = {t: v.target_upside for t, v in usable.items() if v.target_upside is not None}
 
     rec_z = zscores(rec_raw)
@@ -233,16 +235,27 @@ def rank_candidates(
     stage_weights: dict[str, float] | None = None,
     size: int = 10,
     pinned: list[str] | None = None,
+    sector_of: dict[str, str] | None = None,
+    max_per_sector: int = 0,
 ) -> list[ScoredCandidate]:
     """Combine the stages and mark the selected group.
 
     Pinned tickers are always selected and flagged ``manual``. They bypass
     scoring entirely — an explicit human choice is not something to re-rank —
     and they occupy slots, so ``size`` remains the total group size.
+
+    ``max_per_sector`` (0 = unlimited) caps how many picks may share a GICS
+    sector. An unconstrained momentum screen routinely returns ten names from
+    one theme, which makes the group a single sector bet rather than a test of
+    the strategy. The cap is a hard limit, not a preference: if it cannot be
+    satisfied the group comes back SHORT of ``size`` rather than quietly
+    exceeding the cap, because a silently-broken constraint is worse than a
+    smaller group. Pinned tickers are exempt — the user asked for them by name.
     """
     weights = {**DEFAULT_STAGE_WEIGHTS, **(stage_weights or {})}
     analyst_views = analyst_views or {}
     llm_adjustments = llm_adjustments or {}
+    sector_of = sector_of or {}
     pinned_upper = [t.strip().upper() for t in (pinned or []) if t.strip()]
 
     analyst_scores = score_analysts(analyst_views)
@@ -262,7 +275,9 @@ def rank_candidates(
             last_price=cand.last_price,
             llm_reason=reason,
             name=(view.name if view and view.name else cand.ticker),
-            sector=(view.sector if view and view.sector else ""),
+            # The whole-universe sector map wins over the analyst blob: it is
+            # GICS, it is complete, and it is what the cap counts on.
+            sector=(sector_of.get(cand.ticker) or (view.sector if view and view.sector else "")),
             analyst=_analyst_dict(view),
         )
         sc.score = (
@@ -278,26 +293,38 @@ def rank_candidates(
 
     by_ticker = {c.ticker: c for c in scored}
     selected: list[ScoredCandidate] = []
+    per_sector: dict[str, int] = {}
 
     for ticker in pinned_upper:
         cand = by_ticker.get(ticker)
         if cand is None:
             # Pinned but not in the screened universe (or filtered out). Carry it
             # anyway — the user asked for it explicitly.
-            cand = ScoredCandidate(ticker=ticker, name=ticker, manual=True)
+            cand = ScoredCandidate(
+                ticker=ticker, name=ticker, manual=True, sector=sector_of.get(ticker, "")
+            )
             scored.append(cand)
             by_ticker[ticker] = cand
         cand.manual = True
         cand.selected = True
         selected.append(cand)
+        # Pinned picks are exempt from the cap but still counted, so the cap
+        # constrains the AUTOMATIC picks around them rather than being reset.
+        if cand.sector:
+            per_sector[cand.sector] = per_sector.get(cand.sector, 0) + 1
 
     for cand in scored:
         if len(selected) >= size:
             break
         if cand.selected:
             continue
+        if max_per_sector > 0 and cand.sector:
+            if per_sector.get(cand.sector, 0) >= max_per_sector:
+                continue
         cand.selected = True
         selected.append(cand)
+        if cand.sector:
+            per_sector[cand.sector] = per_sector.get(cand.sector, 0) + 1
 
     return scored
 

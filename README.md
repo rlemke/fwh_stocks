@@ -65,6 +65,27 @@ fw runner start --domain stocks           # or: python -m facetwork.runtime.runn
 Four stages, combined into one composite score. Every intermediate value is
 persisted per candidate, so any pick can be explained afterwards.
 
+**A0. Kinds of stock (sectors)** — optionally restrict the pool to named GICS
+sectors before anything expensive runs. Everyday names are accepted
+(`tech`, `medical`, `banks`, `oil`, `reits`), and a combination is fine:
+`sectors="tech, medical"`. Empty means every sector.
+
+Classification comes free with the S&P 500 constituent table (a `GICS Sector`
+column), so filtering a whole universe costs one cached call rather than one
+request per ticker — and it runs *before* the price download, so asking for
+Health Care fetches ~59 symbols instead of 503.
+
+Ambiguous names are refused rather than guessed: `"services"` could mean
+Communication Services or Consumer Discretionary, so it raises and names both.
+Silently picking one would hand back a group you did not ask for.
+
+**A1. `max_per_sector`** — a diversification cap (0 = no cap). An unconstrained
+momentum screen routinely returns ten names from a single theme, which makes the
+group a sector bet rather than a test of the strategy. The cap is a **hard**
+limit: if it cannot be filled the group comes back *smaller* than `size` rather
+than quietly exceeding it, and the shortfall is logged. Pinned tickers are exempt
+from both the filter and the cap — an explicit request outranks them.
+
 **A. Hard filters** — data-quality gates, never scored: price ≥ $5, 20-day
 average dollar volume ≥ $10M, ≥ 252 trading days of history.
 

@@ -41,7 +41,13 @@ namespace stocks.data {
 namespace stocks.groups {
 
     /** Screen + rank the cached universe, price the picks, and persist the group
-      * as open together with its full ranked candidate list. */
+      * as open together with its full ranked candidate list.
+      *
+      * `sectors` restricts the universe to named GICS sectors (comma separated,
+      * everyday names accepted: "tech, medical"). Empty means every sector.
+      * `max_per_sector` caps how many picks may share one sector, 0 = no cap;
+      * it is a hard limit, so a group may come back SHORT of `size` rather than
+      * exceed it. Pinned tickers are exempt from both. */
     event facet OpenGroup(
         name: String,
         universe: String = "sp500",
@@ -51,6 +57,8 @@ namespace stocks.groups {
         benchmark: String = "SPY",
         pinned: String = "",
         use_llm: Boolean = false,
+        sectors: String = "",
+        max_per_sector: Int = 0,
         factor_weights: String = "",
         stage_weights: String = "",
         lookback_days: Int = 400,
@@ -98,6 +106,8 @@ namespace stocks.workflows {
         benchmark: String = "SPY",
         pinned: String = "",
         use_llm: Boolean = false,
+        sectors: String = "",
+        max_per_sector: Int = 0,
         factor_weights: String = "",
         stage_weights: String = "",
         lookback_days: Int = 400,
@@ -131,6 +141,8 @@ namespace stocks.workflows {
             benchmark = $.benchmark,
             pinned = $.pinned,
             use_llm = $.use_llm,
+            sectors = $.sectors,
+            max_per_sector = $.max_per_sector,
             factor_weights = $.factor_weights,
             stage_weights = $.stage_weights,
             lookback_days = $.lookback_days,
