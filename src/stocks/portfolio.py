@@ -126,6 +126,7 @@ def size_positions(
     capital is spread over the names that *did* price, so the group is still
     fully invested and its weights still sum to 1.
     """
+
     def _has_price(pick: dict) -> bool:
         quote = quotes.get(pick["ticker"])
         return bool(quote and quote.price > 0)

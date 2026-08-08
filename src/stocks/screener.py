@@ -116,7 +116,7 @@ def _ret(bars: list[Bar], lookback: int, skip: int = 0) -> float | None:
 
 def realized_vol(bars: list[Bar], window: int = 60) -> float | None:
     """Annualised standard deviation of daily log returns over *window* bars."""
-    closes = [b.close for b in bars[-(window + 1):]]
+    closes = [b.close for b in bars[-(window + 1) :]]
     if len(closes) < 3:
         return None
     rets = [

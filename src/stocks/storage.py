@@ -124,7 +124,9 @@ def _sidecar_path(path: str) -> str:
     return path + ".meta.json"
 
 
-def read_json_cached(cache_type: str, relative_path: str, max_age_s: float | None = None) -> Any | None:
+def read_json_cached(
+    cache_type: str, relative_path: str, max_age_s: float | None = None
+) -> Any | None:
     """Return the cached JSON payload, or ``None`` when absent/incomplete/stale."""
     path = cache_path(cache_type, relative_path)
     side = _sidecar_path(path)
