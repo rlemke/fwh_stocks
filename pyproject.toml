@@ -12,6 +12,9 @@ dependencies = ["requests"]
 
 [project.optional-dependencies]
 yfinance = ["yfinance>=0.2.40"]
+# Declared because CI installs from scratch: tests/test_service.py imports
+# mongomock, which passed locally only because the author's environment had it.
+test = ["pytest>=7.0", "mongomock>=4.1"]
 
 [project.entry-points."facetwork.domains"]
 stocks = "stocks:domain"
