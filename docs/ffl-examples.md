@@ -78,7 +78,9 @@ namespace ex.after {
 
 ## 4. `when` — branch on the outcome
 
-Every `when` needs a default case, and it must be last.
+Attach the `when` to the step it gates: inside the cases `$` is that step, so
+`$.pl_pct` reads `CloseGroup`'s return. Every `when` needs a default case
+(`case _`), and it must be last.
 
 ```ffl
 namespace ex.branch {
@@ -87,31 +89,38 @@ namespace ex.branch {
     event facet Notify(subject: String) => (sent: Boolean)
 
     workflow CloseAndReport(group_id: String) => (sent: Boolean) andThen {
-        closed = CloseGroup(group_id = $.group_id)
-        note = Notify(subject = "group closed") when {
-            closed.pl_pct > closed.benchmark_pl_pct => Notify(subject = "beat the benchmark")
-            closed.pl_pct > 0.0 => Notify(subject = "profitable, trailed the benchmark")
-            default => Notify(subject = "closed at a loss")
+        closed = CloseGroup(group_id = $.group_id) andThen when {
+            case $.pl_pct > $.benchmark_pl_pct => {
+                beat = Notify(subject = "beat the benchmark")
+                yield CloseAndReport(sent = beat.sent)
+            }
+            case $.pl_pct > 0.0 => {
+                trailed = Notify(subject = "profitable, trailed the benchmark")
+                yield CloseAndReport(sent = trailed.sent)
+            }
+            case _ => {
+                lost = Notify(subject = "closed at a loss")
+                yield CloseAndReport(sent = lost.sent)
+            }
         }
-        yield CloseAndReport(sent = note.sent)
     }
 }
 ```
 
 ## 5. `foreach` — several universes in one run
 
-Loop variables are read as `$.<varname>` inside the block.
+Loop variables are read as `$.<varname>` inside the block. `+=` aggregates
+across iterations; a bare `=` would keep only the last one.
 
 ```ffl
 namespace ex.fanout {
     use stocks.data
 
-    workflow WarmCaches(universes: Json) => (done: Boolean) andThen {
-        foreach u in $.universes {
+    workflow WarmCaches(universes: Json) => (symbols: Json)
+        andThen foreach u in $.universes {
             warmed = FetchDailyBars(universe = $.u, lookback_days = 400)
+            yield WarmCaches(symbols += warmed.symbol_count)
         }
-        yield WarmCaches(done = true)
-    }
 }
 ```
 
@@ -165,8 +174,10 @@ namespace ex.lifecycle {
 | A `foreach` loop variable | `$.varname` |
 | Order behind a cache write | `step = F(…) after producer` |
 | Order behind a value | nothing — the reference already orders it |
-| Branch | `when { cond => …  default => … }` (default last) |
-| Bound fan-out width | `foreach x in $.xs limit 4` |
+| Branch | `step = F(…) andThen when { case cond => { … } case _ => { … } }` (default last) |
+| Fan out | `andThen foreach x in $.xs { … }` |
+| Aggregate a fan-out | `yield W(xs += step.field)` |
+| Bound fan-out width | `andThen foreach x in $.xs limit 4 { … }` |
 
 Workflows, facets and schemas must live inside a `namespace`. Numeric types are
 `Int`, `Long`, `Double`; also `String`, `Boolean`, `Json`.

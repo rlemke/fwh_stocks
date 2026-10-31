@@ -146,16 +146,14 @@ registry entry.
 | Workflow | Purpose |
 |---|---|
 | `stocks.workflows.OpenStockGroup` | Resolve universe → cache bars → screen, rank, price, persist as open |
-| `stocks.workflows.SnapshotStockGroups` | Mark one group, or every open group, to market. Run daily by cron. |
+| `stocks.workflows.SnapshotStockGroups` | Mark one group, or every open group, to market. Run daily by `fw svc stocks-snapshot`. |
 | `stocks.workflows.CloseStockGroup` | Final mark, realised per-position P/L, group totals, status closed |
 
-Daily snapshot after the US close:
-
-```cron
-35 16 * * 1-5  cd /path/to/facetwork && ./fw ffl run \
-    ~/fw_handlers/fwh_stocks/src/stocks/ffl/stocks.ffl \
-    --workflow stocks.workflows.SnapshotStockGroups --inputs '{}'
-```
+Daily snapshot after the US close — `fw svc stocks-snapshot --install` writes a
+weekday launchd timer (23:30 local, which is after the close in every DST
+alignment) that submits `SnapshotStockGroups` with a blank `group_id`.
+`fw svc stocks-snapshot` alone runs one snapshot now; `--status` shows the timer.
+Without the timer nothing marks the groups, and they simply stop having a series.
 
 Runs are idempotent per trading date, so a missed or doubled fire is harmless.
 
