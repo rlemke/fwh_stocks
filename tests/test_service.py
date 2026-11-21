@@ -328,12 +328,13 @@ def test_snapshot_series_grows_across_trading_days(db, monkeypatch):
     """A multi-day P/L series is what the progress chart draws."""
     group_id = open_small(db)["group_id"]
     # Advance forward from today so the baseline snapshot stays the earliest
-    # entry in the series; back-dating would sort it last.
+    # entry in the series; back-dating would sort it last. Steps of a week keep
+    # the weekday, so a run on a weekend does not file two marks under Friday.
     base = datetime.datetime.now(datetime.UTC)
     for offset, mult in enumerate([1.01, 1.03, 0.99, 1.05], start=1):
         _freeze_quotes(monkeypatch, db, group_id, multiplier=mult)
         monkeypatch.setattr(
-            service, "_now", lambda b=base, o=offset: b + datetime.timedelta(days=o)
+            service, "_now", lambda b=base, o=offset: b + datetime.timedelta(days=7 * o)
         )
         service.snapshot_group(db, group_id)
 

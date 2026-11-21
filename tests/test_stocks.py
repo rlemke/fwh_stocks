@@ -398,6 +398,21 @@ def test_trading_date_at_the_close_is_the_same_day():
     assert portfolio.trading_date(datetime(2024, 1, 2, 21, 30, tzinfo=UTC)) == "2024-01-02"
 
 
+def test_trading_date_before_the_open_is_the_previous_close():
+    # 23:30 Pacific on a Tuesday is 02:30 Wednesday in New York: Tuesday's close.
+    assert portfolio.trading_date(datetime(2026, 11, 18, 7, 30, tzinfo=UTC)) == "2026-11-17"
+    # 23:30 Pacific on a Friday is Saturday 02:30 in New York: Friday's close.
+    assert portfolio.trading_date(datetime(2026, 11, 21, 7, 30, tzinfo=UTC)) == "2026-11-20"
+    # 08:00 ET on a Monday: Friday's close.
+    assert portfolio.trading_date(datetime(2026, 11, 23, 13, 0, tzinfo=UTC)) == "2026-11-20"
+    # During the session: that day.
+    assert portfolio.trading_date(datetime(2026, 11, 23, 15, 0, tzinfo=UTC)) == "2026-11-23"
+
+
+def test_trading_date_on_a_weekend_is_friday():
+    assert portfolio.trading_date(datetime(2026, 11, 22, 18, 0, tzinfo=UTC)) == "2026-11-20"
+
+
 def test_trading_date_accepts_naive_datetime_as_utc():
     assert portfolio.trading_date(datetime(2024, 7, 3, 1, 0)) == "2024-07-02"
 

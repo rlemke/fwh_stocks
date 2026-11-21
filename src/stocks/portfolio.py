@@ -17,7 +17,7 @@ Two conventions worth stating because they are easy to get wrong:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .providers import Quote
@@ -95,16 +95,27 @@ def utc_now_iso() -> str:
 
 
 def trading_date(moment: datetime | None = None) -> str:
-    """The US/Eastern calendar date of *moment* (default: now), as ISO yyyy-mm-dd.
+    """The trading session whose prices a quote taken at *moment* (default: now)
+    shows, as ISO yyyy-mm-dd: the US/Eastern date, except that before the 09:30
+    open, and on a weekend, the latest quote is the previous weekday's close.
 
-    This is the snapshot key. It is a calendar date, not an assertion that the
-    market was open — a holiday snapshot simply records the prior close, and the
+    This is the snapshot key. A US/Eastern calendar date alone was wrong for a
+    timer whose clock is not on European time: 23:30 Pacific is 02:30 the next
+    day in New York, so every evening mark was filed one day late and Friday's
+    close as Saturday (2026-09-02 to 2026-11-21). Holidays are not special-cased:
+    a holiday snapshot records the prior close under the holiday's date, and the
     upsert makes a repeat harmless.
     """
     moment = moment or datetime.now(UTC)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(MARKET_TZ).date().isoformat()
+    local = moment.astimezone(MARKET_TZ)
+    day = local.date()
+    if local.weekday() < 5 and (local.hour, local.minute) < (9, 30):
+        day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
 
 
 def pct(numerator: float, denominator: float) -> float:
