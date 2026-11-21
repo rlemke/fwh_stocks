@@ -16,8 +16,9 @@ Two conventions worth stating because they are easy to get wrong:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .providers import Quote
@@ -116,6 +117,53 @@ def trading_date(moment: datetime | None = None) -> str:
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day.isoformat()
+
+
+def apply_splits(
+    position: dict,
+    splits: list[tuple[date, float]],
+    today: date,
+    quote_price: float | None = None,
+) -> dict | None:
+    """The share count and entry price of *position* after the splits it has not had yet.
+
+    A split multiplies the shares and divides the entry price (and the last mark)
+    by the same ratio, so the cost and the profit or loss are unchanged by it;
+    without this an 8-for-1 split reads as a 7/8 loss. Applied splits are recorded
+    by date in splits_applied, so each is applied once.
+
+    A split dated up to four days ahead is applied only when the quote has
+    already moved to the new basis (the feed adjusts the evening before the
+    effective date): the quote is then closer to last_price / ratio than to
+    last_price. Returns the fields to update, or None when nothing changed.
+    """
+    entry_day = date.fromisoformat(str(position.get("entry_at") or "")[:10] or "1970-01-01")
+    applied = list(position.get("splits_applied") or [])
+    shares = float(position["shares"])
+    entry = float(position["entry_price"])
+    last = position.get("last_price")
+    last = float(last) if last else None
+    changed = False
+    for day, ratio in sorted(splits):
+        if day <= entry_day or day.isoformat() in applied or not ratio or ratio == 1:
+            continue
+        if day > today:
+            if day > today + timedelta(days=4) or not (quote_price and last):
+                continue
+            if abs(math.log(quote_price * ratio / last)) >= abs(math.log(quote_price / last)):
+                continue
+        shares *= ratio
+        entry /= ratio
+        if last:
+            last /= ratio
+        applied.append(day.isoformat())
+        changed = True
+    if not changed:
+        return None
+    out = {"shares": round(shares, 6), "entry_price": round(entry, 6), "splits_applied": applied}
+    if last:
+        out["last_price"] = round(last, 4)
+    return out
 
 
 def pct(numerator: float, denominator: float) -> float:

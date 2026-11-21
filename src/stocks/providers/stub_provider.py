@@ -221,3 +221,16 @@ class StubProvider:
                 sector="Synthetic",
             )
         return out
+
+    # -- corporate actions -------------------------------------------------
+
+    #: Tests set this to {ticker: [(date, ratio), ...]}; the synthetic market has no splits.
+    split_table: dict[str, list[tuple[date, float]]] = {}
+
+    def splits(self, tickers: list[str], since: date) -> dict[str, list[tuple[date, float]]]:
+        out = {}
+        for t in tickers:
+            rows = [(d, r) for d, r in self.split_table.get(t, []) if d > since]
+            if rows:
+                out[t] = sorted(rows)
+        return out

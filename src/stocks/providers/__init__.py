@@ -118,6 +118,13 @@ class PriceProvider(Protocol):
         """Consensus view per ticker; may be empty when the feed has no coverage."""
         ...
 
+    def splits(self, tickers: list[str], since: date) -> dict[str, list[tuple[date, float]]]:
+        """Stock splits after *since* per ticker, as (effective date, new shares per old share).
+
+        Tickers with none are omitted. A 1-for-8 reverse split is ratio 0.125.
+        """
+        ...
+
 
 # --------------------------------------------------------------------------
 # Factory

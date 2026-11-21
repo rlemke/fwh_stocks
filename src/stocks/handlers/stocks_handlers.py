@@ -26,6 +26,7 @@ logger = logging.getLogger("stocks.handlers")
 
 DATA_NS = "stocks.data"
 NS = "stocks.groups"
+SITE_NS = "stocks.site"
 
 
 def _db():
@@ -180,7 +181,37 @@ def handle_close_group(params: dict[str, Any]) -> dict[str, Any]:
         raise
 
 
+def handle_site_build(params: dict[str, Any]) -> dict[str, Any]:
+    """Render the static pages locally, then copy them to the domain's output store.
+
+    Staged locally because an object store has no partial writes; every page is
+    regenerated each run, so a crash halfway is repaired by the next run.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from ..site import build_site
+    from ..storage import _S, is_remote, join
+
+    dest = join(_S.output_root(), "site")
+    with tempfile.TemporaryDirectory(prefix="stocks_site_") as tmp:
+        out = build_site(_db(), tmp)
+        for rel in out["paths"]:
+            target = join(dest, rel)
+            if not is_remote(target):
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+            _S.write_bytes(target, Path(tmp, rel).read_bytes())
+    log = _log_wrapper(params)
+    if log:
+        log(
+            f"Wrote {out['files']} pages ({out['groups']} groups, latest {out['latest']}) to {dest}",
+            level="success",
+        )
+    return {"output_dir": dest, "files": out["files"], "latest": out["latest"]}
+
+
 _DISPATCH: dict[str, Callable[[dict], dict]] = {
+    f"{SITE_NS}.Build": handle_site_build,
     f"{DATA_NS}.ResolveUniverse": handle_resolve_universe,
     f"{DATA_NS}.FetchDailyBars": handle_fetch_daily_bars,
     f"{NS}.OpenGroup": handle_open_group,

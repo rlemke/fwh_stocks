@@ -497,3 +497,29 @@ def test_no_sector_options_means_no_sector_lookup(db, monkeypatch):
     )
     open_small(db, universe="dow30", size=2)
     assert called == []
+
+
+def test_snapshot_applies_a_split_without_a_loss(db, monkeypatch):
+    """An 8-for-1 split must not read as a 7/8 loss."""
+    from stocks.providers.stub_provider import StubProvider
+
+    group_id = open_small(db)["group_id"]
+    positions = dbmod.get_positions(db, group_id)
+    t = positions[0]["ticker"]
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=10)
+    split_day = (later - datetime.timedelta(days=5)).date()
+    monkeypatch.setattr(StubProvider, "split_table", {t: [(split_day, 8.0)]})
+    prices = {p["ticker"]: p["entry_price"] for p in positions}
+    prices[t] = prices[t] / 8
+    group = dbmod.get_group(db, group_id)
+    _patch_quotes(monkeypatch, prices, benchmark_price=group["benchmark_entry"])
+    monkeypatch.setattr(service, "_now", lambda: later)
+    out = service.snapshot_group(db, group_id)
+    assert out["pl_pct"] == pytest.approx(0.0, abs=1e-6)
+    moved = next(p for p in dbmod.get_positions(db, group_id) if p["ticker"] == t)
+    assert moved["shares"] == pytest.approx(positions[0]["shares"] * 8, rel=1e-6)
+    assert moved["splits_applied"] == [split_day.isoformat()]
+    # A second snapshot does not split again.
+    service.snapshot_group(db, group_id)
+    again = next(p for p in dbmod.get_positions(db, group_id) if p["ticker"] == t)
+    assert again["shares"] == pytest.approx(moved["shares"])

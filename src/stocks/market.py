@@ -198,3 +198,14 @@ def fetch_quotes(tickers: list[str], provider: PriceProvider | None = None) -> d
     """Current prices. Never cached — a stale "current" price is worse than none."""
     provider = provider or get_provider()
     return provider.quotes(list(dict.fromkeys(tickers)))
+
+
+def fetch_splits(
+    tickers: list[str], since: date, provider: PriceProvider | None = None
+) -> dict[str, list[tuple[date, float]]]:
+    """Splits after *since*; empty for a provider that cannot report them."""
+    provider = provider or get_provider()
+    lookup = getattr(provider, "splits", None)
+    if lookup is None:
+        return {}
+    return lookup(list(dict.fromkeys(tickers)), since)

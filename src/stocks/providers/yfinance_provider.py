@@ -279,6 +279,28 @@ class YFinanceProvider:
             )
         return out
 
+    # -- corporate actions -------------------------------------------------
+
+    def splits(self, tickers: list[str], since: date) -> dict[str, list[tuple[date, float]]]:
+        if not tickers:
+            return {}
+        yf = self._yf()
+        out: dict[str, list[tuple[date, float]]] = {}
+        for t in tickers:
+            symbol = _normalise(t)
+            try:
+                series = yf.Ticker(symbol).splits
+            except Exception as exc:  # noqa: BLE001
+                raise ProviderError(f"yfinance split lookup failed for {symbol}: {exc}") from exc
+            rows = [
+                (ts.date(), float(ratio))
+                for ts, ratio in series.items()
+                if ts.date() > since and ratio and float(ratio) != 1.0
+            ]
+            if rows:
+                out[t] = sorted(rows)
+        return out
+
     # -- internals ---------------------------------------------------------
 
     @staticmethod

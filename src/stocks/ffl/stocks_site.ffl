@@ -1,0 +1,63 @@
+// Publishing the stock groups as static pages on the maps site.
+//
+// Kept apart from stocks.ffl because it composes another domain's facet
+// (census.Publish.PublishWebBundle, the shared token-gated Pages publisher),
+// so compiling it needs that domain's FFL as a library:
+//
+//   fw ffl run --primary stocks_site.ffl --library stocks.ffl \
+//       --library <fwh_census_us>/src/census_us/handlers/publish/ffl/census_publish.ffl \
+//       --workflow stocks.publish.UpdateSite
+//
+// The publisher replaces only the dest subtree and merges the gallery
+// landing, so the other bundles on the site are untouched.
+
+namespace stocks.publish {
+    use census.Publish
+
+    /** Render the pages from what is in the database and publish them. */
+    workflow PublishSite(
+        repo: String = "rlemke/facetwork-maps",
+        dest: String = "stocks",
+        label: String = "Stock groups (paper trading)"
+    ) => (pages_url: String, files: Long, commit: String) andThen {
+        site = stocks.site.Build()
+        published = PublishWebBundle(
+            repo = $.repo,
+            prefixes = [site.output_dir],
+            dests = [$.dest],
+            include = [".html"],
+            labels = [$.label]
+        )
+        yield PublishSite(
+            pages_url = published.pages_url,
+            files = site.files,
+            commit = published.commit
+        )
+    }
+
+    /** The daily job: mark every open group to market, then render and
+      * publish the pages. */
+    workflow UpdateSite(
+        repo: String = "rlemke/facetwork-maps",
+        dest: String = "stocks",
+        label: String = "Stock groups (paper trading)"
+    ) => (pages_url: String, files: Long, commit: String, latest: String) andThen {
+        snap = stocks.groups.SnapshotGroups(group_id = "")
+        // INVISIBLE dependency: the marks are written to the database and no
+        // value flows from them into the build.
+        site = stocks.site.Build() after snap
+        published = PublishWebBundle(
+            repo = $.repo,
+            prefixes = [site.output_dir],
+            dests = [$.dest],
+            include = [".html"],
+            labels = [$.label]
+        )
+        yield UpdateSite(
+            pages_url = published.pages_url,
+            files = site.files,
+            commit = published.commit,
+            latest = site.latest
+        )
+    }
+}

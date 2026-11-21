@@ -733,3 +733,54 @@ def test_sector_map_beats_the_analyst_blob():
         size=1,
     )
     assert scored[0].sector == "Utilities"
+
+
+# --------------------------------------------------------------------------
+# splits
+# --------------------------------------------------------------------------
+
+
+def _pos(**kw):
+    base = {"ticker": "SNDK", "shares": 6.3828, "entry_price": 1566.70, "entry_at": "2026-09-01T11:59:00+00:00", "last_price": 755.16}
+    return {**base, **kw}
+
+
+def test_split_keeps_cost_and_multiplies_shares():
+    from datetime import date
+
+    f = portfolio.apply_splits(_pos(), [(date(2026, 11, 20), 8.0)], date(2026, 11, 20), 79.24)
+    assert f["shares"] == pytest.approx(51.0624)
+    assert f["entry_price"] == pytest.approx(195.8375)
+    assert f["shares"] * f["entry_price"] == pytest.approx(6.3828 * 1566.70)
+    assert f["splits_applied"] == ["2026-11-20"]
+
+
+def test_split_is_applied_once():
+    from datetime import date
+
+    p = _pos(splits_applied=["2026-11-20"])
+    assert portfolio.apply_splits(p, [(date(2026, 11, 20), 8.0)], date(2026, 11, 21), 79.24) is None
+
+
+def test_split_before_entry_is_ignored():
+    from datetime import date
+
+    assert portfolio.apply_splits(_pos(), [(date(2026, 6, 1), 2.0)], date(2026, 11, 21), 79.24) is None
+
+
+def test_pending_split_waits_for_the_quote_to_move():
+    from datetime import date
+
+    split = [(date(2026, 11, 20), 8.0)]
+    # The evening before: quote still on the old basis -> not yet.
+    assert portfolio.apply_splits(_pos(last_price=776.22), split, date(2026, 11, 19), 760.0) is None
+    # The feed already adjusted (94.40 ~ 776 / 8) -> apply now.
+    f = portfolio.apply_splits(_pos(last_price=776.22), split, date(2026, 11, 19), 94.395)
+    assert f is not None and f["last_price"] == pytest.approx(97.0275)
+
+
+def test_reverse_split():
+    from datetime import date
+
+    f = portfolio.apply_splits(_pos(shares=100.0, entry_price=2.0, last_price=1.0), [(date(2026, 10, 1), 0.1)], date(2026, 10, 2), 10.0)
+    assert f["shares"] == pytest.approx(10.0) and f["entry_price"] == pytest.approx(20.0)

@@ -284,6 +284,55 @@ def open_group(
 # --------------------------------------------------------------------------
 
 
+def _apply_splits(db, group: dict, positions: list[dict], quotes: dict, provider, step_log):
+    """Bring positions (and the benchmark entry) onto the post-split share basis.
+
+    Quotes come back split-adjusted, so a position still counting pre-split
+    shares would read a split as a loss.
+    """
+    benchmark = group.get("benchmark") or DEFAULT_BENCHMARK
+    opened = str(group.get("opened_at") or "")[:10] or "1970-01-01"
+    since = min([opened] + [str(p.get("entry_at") or opened)[:10] for p in positions])
+    splits = market.fetch_splits(
+        [p["ticker"] for p in positions] + [benchmark],
+        datetime.fromisoformat(since).date() - timedelta(days=1),
+        provider=provider,
+    )
+    if not splits:
+        return positions, group
+    today = _now().astimezone(portfolio.MARKET_TZ).date()
+
+    def note(msg: str) -> None:
+        logger.info(msg)
+        if step_log:
+            step_log(msg, level="info")
+
+    out = []
+    for p in positions:
+        q = quotes.get(p["ticker"])
+        fields = portfolio.apply_splits(p, splits.get(p["ticker"], []), today, q.price if q else None)
+        if fields:
+            dbmod.update_position(db, group["group_id"], p["ticker"], fields)
+            note(f"{group['group_id']}: {p['ticker']} split {fields['splits_applied'][-1]}: shares {p['shares']} -> {fields['shares']}")
+            p = {**p, **fields}
+        out.append(p)
+    if group.get("benchmark_entry") and benchmark in splits:
+        q = quotes.get(benchmark)
+        pseudo = {
+            "shares": 1.0,
+            "entry_price": group["benchmark_entry"],
+            "entry_at": opened,
+            "splits_applied": group.get("benchmark_splits_applied"),
+        }
+        fields = portfolio.apply_splits(pseudo, splits[benchmark], today, q.price if q else None)
+        if fields:
+            upd = {"benchmark_entry": fields["entry_price"], "benchmark_splits_applied": fields["splits_applied"]}
+            dbmod.set_group_fields(db, group["group_id"], upd)
+            note(f"{group['group_id']}: benchmark {benchmark} split; entry -> {fields['entry_price']}")
+            group = {**group, **upd}
+    return out, group
+
+
 def snapshot_group(db, group_id: str, *, step_log=None, kind: str = "interim") -> dict:
     """Price an open group and upsert today's snapshot."""
     group = dbmod.get_group(db, group_id)
@@ -296,6 +345,7 @@ def snapshot_group(db, group_id: str, *, step_log=None, kind: str = "interim") -
     provider = market.get_provider()
     benchmark = group.get("benchmark") or DEFAULT_BENCHMARK
     quotes = market.fetch_quotes([p["ticker"] for p in positions] + [benchmark], provider=provider)
+    positions, group = _apply_splits(db, group, positions, quotes, provider, step_log)
 
     snapshot = portfolio.build_snapshot(
         positions,

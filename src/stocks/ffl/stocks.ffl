@@ -91,6 +91,18 @@ namespace stocks.groups {
     ) with Effect(kind = "io") with Cost(tier = "cheap") with Timeout(minutes = 15)
 }
 
+namespace stocks.site {
+
+    /** Render the static pages (an index and one page per group) from the
+      * database into the domain's output store, under site/. Output depends
+      * only on the data, so an unchanged day writes identical pages. */
+    event facet Build() => (
+        output_dir: String,
+        files: Long,
+        latest: String
+    ) with Effect(kind = "io") with Cost(tier = "cheap") with Timeout(minutes = 10)
+}
+
 namespace stocks.workflows {
     use stocks.data
     use stocks.groups

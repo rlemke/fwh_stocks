@@ -126,8 +126,21 @@ what lets you check afterwards how the names you didn't pick performed.
 `provider.quotes()` returns the last trade or most recent close with an `as_of`
 timestamp, which is stored on every snapshot so a stale feed is visible rather
 than silently producing a flat line. Snapshots are upserted on
-`(group_id, snapshot_date)` where the date is the **US/Eastern trading date**, so
-a repeated run on the same day corrects rather than duplicates.
+`(group_id, snapshot_date)`, where the date is the **trading session whose prices
+the quote shows**: the US/Eastern date, except that before the 09:30 open and on
+weekends it is the previous weekday. A repeated run for the same session
+corrects rather than duplicates. (Until 2026-11-21 the key was the bare
+US/Eastern date; with the timer's host on Pacific time, 23:30 local is 02:30 in
+New York, so every evening mark from 2026-09-02 was filed one day late. Those
+234 snapshots were re-dated; each carries `relabelled_from`.)
+
+**Stock splits.** Quotes come back on the post-split basis, so before marking,
+each position takes the splits it has not had yet (`provider.splits`): shares
+times the ratio, entry price divided by it, recorded in `splits_applied`, so the
+cost and the P/L are unchanged by the split. A split dated up to four days ahead
+is applied once the quote has already moved to the new basis, which the feed
+does the evening before. Without this, SNDK's 8-for-1 split on 2026-11-20 read
+as a 95% loss in two groups.
 
 ## Price providers
 
@@ -148,10 +161,19 @@ registry entry.
 | `stocks.workflows.OpenStockGroup` | Resolve universe → cache bars → screen, rank, price, persist as open |
 | `stocks.workflows.SnapshotStockGroups` | Mark one group, or every open group, to market. Run daily by `fw svc stocks-snapshot`. |
 | `stocks.workflows.CloseStockGroup` | Final mark, realised per-position P/L, group totals, status closed |
+| `stocks.publish.PublishSite` | Render the static pages (`stocks.site.Build`) and publish them to the maps site under `stocks/` |
+| `stocks.publish.UpdateSite` | Mark every open group, then render and publish |
+
+The two publish workflows live in `ffl/stocks_site.ffl` because they use the
+census domain's Pages publisher (`census.Publish.PublishWebBundle`), so that
+repo's FFL is a library when compiling them. The pages are plain HTML with an
+inline SVG chart; `python -m stocks.site --out DIR` writes the same pages from
+the command line. Live: https://rlemke.github.io/facetwork-maps/stocks/
 
 Daily snapshot after the US close — `fw svc stocks-snapshot --install` writes a
-weekday launchd timer (23:30 local, which is after the close in every DST
-alignment) that submits `SnapshotStockGroups` with a blank `group_id`.
+weekday launchd timer (default 23:30 local; `--at` sets it, and the timer's
+host now runs at 14:30 Pacific, 17:30 in New York) that submits
+`SnapshotStockGroups` with a blank `group_id`.
 `fw svc stocks-snapshot` alone runs one snapshot now; `--status` shows the timer.
 Without the timer nothing marks the groups, and they simply stop having a series.
 
